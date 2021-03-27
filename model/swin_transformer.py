@@ -74,10 +74,10 @@ class WindowAttention(nn.Module):
             displacement = window_size // 2
             self.cyclic_shift = CyclicShift(-displacement)
             self.cyclic_back_shift = CyclicShift(displacement)
-            self.upper_lower_mask = create_mask(window_size=window_size, displacement=displacement,
-                                                upper_lower=True, left_right=False)
-            self.left_right_mask = create_mask(window_size=window_size, displacement=displacement,
-                                               upper_lower=False, left_right=True)
+            self.upper_lower_mask = nn.Parameter(create_mask(window_size=window_size, displacement=displacement,
+                                                             upper_lower=True, left_right=False), requires_grad=False)
+            self.left_right_mask = nn.Parameter(create_mask(window_size=window_size, displacement=displacement,
+                                                            upper_lower=False, left_right=True), requires_grad=False)
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
         self.pos_embedding = nn.Parameter(torch.randn(self.window_size ** 2, self.window_size ** 2))
