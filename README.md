@@ -44,6 +44,7 @@ Number of channels of the input.
   
 ### TODO
 - Replace learnable positional embedding bias by relative position bias.
+- Adjust code for and validate on ImageNet-1K and COCO 2017
 
 ### References
 Some part of the code is adapted from the PyTorch - VisionTransformer repository [https://github.com/lucidrains/vit-pytorch](https://github.com/lucidrains/vit-pytorch) ,
