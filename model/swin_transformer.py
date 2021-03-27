@@ -45,16 +45,16 @@ class FeedForward(nn.Module):
 
 
 def create_mask(window_size, displacement, upper_lower, left_right):
-    mask = torch.ones(window_size ** 2, window_size ** 2)
+    mask = torch.zeros(window_size ** 2, window_size ** 2)
 
     if upper_lower:
-        mask[-displacement * window_size:, :-displacement * window_size] = 0
-        mask[:-displacement * window_size, -displacement * window_size:] = 0
+        mask[-displacement * window_size:, :-displacement * window_size] = float('-inf')
+        mask[:-displacement * window_size, -displacement * window_size:] = float('-inf')
 
     if left_right:
         mask = rearrange(mask, '(h1 w1) (h2 w2) -> h1 w1 h2 w2', h1=window_size, h2=window_size)
-        mask[:, -displacement:, :, :-displacement] = 0
-        mask[:, :-displacement, :, -displacement:] = 0
+        mask[:, -displacement:, :, :-displacement] = float('-inf')
+        mask[:, :-displacement, :, -displacement:] = float('-inf')
         mask = rearrange(mask, 'h1 w1 h2 w2 -> (h1 w1) (h2 w2)')
 
     return mask
@@ -99,8 +99,8 @@ class WindowAttention(nn.Module):
         dots += self.pos_embedding
 
         if self.shifted:
-            dots[:, :, -nw_h:] *= self.upper_lower_mask
-            dots[:, :, nw_h - 1::nw_h] *= self.left_right_mask
+            dots[:, :, -nw_h:] += self.upper_lower_mask
+            dots[:, :, nw_h - 1::nw_h] += self.left_right_mask
 
         attn = dots.softmax(dim=-1)
 
