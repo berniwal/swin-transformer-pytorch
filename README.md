@@ -47,7 +47,7 @@ Num classes the output should have.
 - `head_dim`: int.  
 What dimension each head should have.    
 - `window_size`: int.  
-What window size to use, make sure that after each downscaling the image is still divisible by the window size.    
+What window size to use, make sure that after each downscaling the image dimensions are still divisible by the window size.    
 - `downscaling_factors`: 4-tuple of ints.  
 What downscaling factor to use in each stage. Make sure image dimension is large enough for downscaling factors.
   
