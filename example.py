@@ -1,5 +1,5 @@
 import torch
-from swin_transformer import SwinTransformer
+from swin_transformer_pytorch import SwinTransformer
 
 net = SwinTransformer(
     hidden_dim=96,
