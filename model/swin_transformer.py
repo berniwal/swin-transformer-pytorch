@@ -61,12 +61,12 @@ def create_mask(window_size, displacement, upper_lower, left_right):
 
 
 class WindowAttention(nn.Module):
-    def __init__(self, dim, heads, dim_head, shifted, window_size=7):
+    def __init__(self, dim, heads, head_dim, shifted, window_size=7):
         super().__init__()
-        inner_dim = dim_head * heads
+        inner_dim = head_dim * heads
 
         self.heads = heads
-        self.scale = dim_head ** -0.5
+        self.scale = head_dim ** -0.5
         self.window_size = window_size
         self.shifted = shifted
 
@@ -87,9 +87,11 @@ class WindowAttention(nn.Module):
         if self.shifted:
             x = self.cyclic_shift(x)
 
-        b, n, _, _, h = *x.shape, self.heads
+        b, n_h, n_w, _, h = *x.shape, self.heads
+
         qkv = self.to_qkv(x).chunk(3, dim=-1)
-        nw_h = nw_w = n // self.window_size
+        nw_h = n_h // self.window_size
+        nw_w = n_w // self.window_size
 
         q, k, v = map(
             lambda t: rearrange(t, 'b (nw_h w_h) (nw_w w_w) (h d) -> b h (nw_h nw_w) (w_h w_w) d',
@@ -99,8 +101,8 @@ class WindowAttention(nn.Module):
         dots += self.pos_embedding
 
         if self.shifted:
-            dots[:, :, -nw_h:] += self.upper_lower_mask
-            dots[:, :, nw_h - 1::nw_h] += self.left_right_mask
+            dots[:, :, -nw_w:] += self.upper_lower_mask
+            dots[:, :, nw_w - 1::nw_w] += self.left_right_mask
 
         attn = dots.softmax(dim=-1)
 
@@ -110,15 +112,18 @@ class WindowAttention(nn.Module):
         out = self.to_out(out)
 
         if self.shifted:
-            x = self.cyclic_back_shift(x)
+            out = self.cyclic_back_shift(out)
         return out
 
 
 class SwinBlock(nn.Module):
-    def __init__(self, dim, heads, dim_head, mlp_dim, shifted):
+    def __init__(self, dim, heads, head_dim, mlp_dim, shifted, window_size):
         super().__init__()
-        self.attention_block = Residual(
-            PreNorm(dim, WindowAttention(dim=dim, heads=heads, dim_head=dim_head, shifted=shifted)))
+        self.attention_block = Residual(PreNorm(dim, WindowAttention(dim=dim,
+                                                                     heads=heads,
+                                                                     head_dim=head_dim,
+                                                                     shifted=shifted,
+                                                                     window_size=window_size)))
         self.mlp_block = Residual(PreNorm(dim, FeedForward(dim=dim, hidden_dim=mlp_dim)))
 
     def forward(self, x):
@@ -143,7 +148,7 @@ class PatchMerging(nn.Module):
 
 
 class StageModule(nn.Module):
-    def __init__(self, in_channels, hidden_dimension, layers, downscaling_factor, num_heads):
+    def __init__(self, in_channels, hidden_dimension, layers, downscaling_factor, num_heads, head_dim, window_size):
         super().__init__()
         assert layers % 2 == 0, 'Stage layers need to be divisible by 2 for regular and shifted block.'
 
@@ -153,10 +158,10 @@ class StageModule(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(layers // 2):
             self.layers.append(nn.ModuleList([
-                SwinBlock(dim=hidden_dimension, heads=num_heads, dim_head=32, mlp_dim=hidden_dimension * 4,
-                          shifted=False),
-                SwinBlock(dim=hidden_dimension, heads=num_heads, dim_head=32, mlp_dim=hidden_dimension * 4,
-                          shifted=True),
+                SwinBlock(dim=hidden_dimension, heads=num_heads, head_dim=head_dim, mlp_dim=hidden_dimension * 4,
+                          shifted=False, window_size=window_size),
+                SwinBlock(dim=hidden_dimension, heads=num_heads, head_dim=head_dim, mlp_dim=hidden_dimension * 4,
+                          shifted=True, window_size=window_size),
             ]))
 
     def forward(self, x):
@@ -168,17 +173,22 @@ class StageModule(nn.Module):
 
 
 class SwinTransformer(nn.Module):
-    def __init__(self, *, num_classes, hidden_dim, layers, heads, channels=3):
+    def __init__(self, *, hidden_dim, layers, heads, channels=3, num_classes=1000, head_dim=32, window_size=7,
+                 downscaling_factors=(4, 2, 2, 2)):
         super().__init__()
 
         self.stage1 = StageModule(in_channels=channels, hidden_dimension=hidden_dim, layers=layers[0],
-                                  downscaling_factor=4, num_heads=heads[0])
+                                  downscaling_factor=downscaling_factors[0], num_heads=heads[0], head_dim=head_dim,
+                                  window_size=window_size)
         self.stage2 = StageModule(in_channels=hidden_dim, hidden_dimension=hidden_dim * 2, layers=layers[1],
-                                  downscaling_factor=2, num_heads=heads[1])
+                                  downscaling_factor=downscaling_factors[1], num_heads=heads[1], head_dim=head_dim,
+                                  window_size=window_size)
         self.stage3 = StageModule(in_channels=hidden_dim * 2, hidden_dimension=hidden_dim * 4, layers=layers[2],
-                                  downscaling_factor=2, num_heads=heads[2])
+                                  downscaling_factor=downscaling_factors[2], num_heads=heads[2], head_dim=head_dim,
+                                  window_size=window_size)
         self.stage4 = StageModule(in_channels=hidden_dim * 4, hidden_dimension=hidden_dim * 8, layers=layers[3],
-                                  downscaling_factor=2, num_heads=heads[3])
+                                  downscaling_factor=downscaling_factors[3], num_heads=heads[3], head_dim=head_dim,
+                                  window_size=window_size)
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(hidden_dim * 8),
@@ -194,17 +204,17 @@ class SwinTransformer(nn.Module):
         return self.mlp_head(x)
 
 
-def swin_t(num_classes=1000, hidden_dim=96, layers=(2, 2, 6, 2), heads=(3, 6, 12, 24), **kwargs):
-    return SwinTransformer(num_classes=num_classes, hidden_dim=hidden_dim, layers=layers, heads=heads, **kwargs)
+def swin_t(hidden_dim=96, layers=(2, 2, 6, 2), heads=(3, 6, 12, 24), **kwargs):
+    return SwinTransformer(hidden_dim=hidden_dim, layers=layers, heads=heads, **kwargs)
 
 
-def swin_s(num_classes=1000, hidden_dim=96, layers=(2, 2, 18, 2), heads=(3, 6, 12, 24), **kwargs):
-    return SwinTransformer(num_classes=num_classes, hidden_dim=hidden_dim, layers=layers, heads=heads, **kwargs)
+def swin_s(hidden_dim=96, layers=(2, 2, 18, 2), heads=(3, 6, 12, 24), **kwargs):
+    return SwinTransformer(hidden_dim=hidden_dim, layers=layers, heads=heads, **kwargs)
 
 
-def swin_b(num_classes=1000, hidden_dim=128, layers=(2, 2, 18, 2), heads=(4, 8, 16, 32), **kwargs):
-    return SwinTransformer(num_classes=num_classes, hidden_dim=hidden_dim, layers=layers, heads=heads, **kwargs)
+def swin_b(hidden_dim=128, layers=(2, 2, 18, 2), heads=(4, 8, 16, 32), **kwargs):
+    return SwinTransformer(hidden_dim=hidden_dim, layers=layers, heads=heads, **kwargs)
 
 
-def swin_l(num_classes=1000, hidden_dim=192, layers=(2, 2, 18, 2), heads=(6, 12, 24, 48), **kwargs):
-    return SwinTransformer(num_classes=num_classes, hidden_dim=hidden_dim, layers=layers, heads=heads, **kwargs)
+def swin_l(hidden_dim=192, layers=(2, 2, 18, 2), heads=(6, 12, 24, 48), **kwargs):
+    return SwinTransformer(hidden_dim=hidden_dim, layers=layers, heads=heads, **kwargs)

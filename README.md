@@ -20,19 +20,20 @@ import torch
 from model.swin_transformer import SwinTransformer
 
 net = SwinTransformer(
-    num_classes=3,
     hidden_dim=96,
     layers=(2, 2, 6, 2),
     heads=(3, 6, 12, 24),
-    channels=3
+    channels=3,
+    num_classes=3,
+    head_dim=32,
+    window_size=7,
+    downscaling_factors=(4, 2, 2, 2)
 )
-
 dummy_x = torch.randn(1, 3, 224, 224)
 logits = net(dummy_x)  # (1,3)
+print(logits)
 ```
 ### Parameters
-- `num_classes`: int.  
-Num classes the output should have.
 - `hidden_dim`: int.  
 What hidden dimension you want to use for the architecture, noted C in the original paper
 - `layers`: 4-tuple of ints divisible by 2.  
@@ -40,7 +41,15 @@ How many layers in each stage to apply. Every int should be divisible by two bec
 - `heads`: 4-tuple of ints   
 How many heads in each stage to apply.
 - `channels`: int.  
-Number of channels of the input.
+Number of channels of the input.    
+- `num_classes`: int.  
+Num classes the output should have.    
+- `head_dim`: int.  
+What dimension each head should have.    
+- `window_size`: int.  
+What window size to use, make sure that after each downscaling the image is still divisible by the window size.    
+- `downscaling_factors`: 4-tuple of ints.  
+What downscaling factor to use in each stage. Make sure image dimension is large enough for downscaling factors.
   
 ### TODO
 - Replace learnable positional embedding bias by relative position bias.
