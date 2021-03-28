@@ -17,7 +17,7 @@ $ pip install -r requirements.txt
 
 ```python
 import torch
-from model.swin_transformer import SwinTransformer
+from swin_transformer import SwinTransformer
 
 net = SwinTransformer(
     hidden_dim=96,
