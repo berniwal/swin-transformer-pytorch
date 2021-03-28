@@ -10,6 +10,12 @@ All credits go to the authors [Ze Liu](https://github.com/zeliu98/), [Yutong Lin
 ### Install
 
 ```bash
+$ pip install swin-transformer-pytorch
+```
+
+or (if you clone the repository)
+
+```bash
 $ pip install -r requirements.txt
 ```
 
