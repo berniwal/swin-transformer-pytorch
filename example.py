@@ -13,4 +13,5 @@ net = SwinTransformer(
 )
 dummy_x = torch.randn(1, 3, 224, 224)
 logits = net(dummy_x)  # (1,3)
+print(net)
 print(logits)
