@@ -1,5 +1,6 @@
 import torch
 from torch import nn, einsum
+import numpy as np
 from einops import rearrange, repeat
 
 
@@ -60,14 +61,21 @@ def create_mask(window_size, displacement, upper_lower, left_right):
     return mask
 
 
+def get_relative_distances(window_size):
+    indices = torch.tensor(np.array([[x, y] for x in range(window_size) for y in range(window_size)]))
+    distances = indices.transpose(0, 1)[None, :, :] - indices[:, :, None]
+    return distances.permute(0, 2, 1)
+
+
 class WindowAttention(nn.Module):
-    def __init__(self, dim, heads, head_dim, shifted, window_size=7):
+    def __init__(self, dim, heads, head_dim, shifted, window_size, relative_pos_embedding):
         super().__init__()
         inner_dim = head_dim * heads
 
         self.heads = heads
         self.scale = head_dim ** -0.5
         self.window_size = window_size
+        self.relative_pos_embedding = relative_pos_embedding
         self.shifted = shifted
 
         if self.shifted:
@@ -80,7 +88,13 @@ class WindowAttention(nn.Module):
                                                             upper_lower=False, left_right=True), requires_grad=False)
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
-        self.pos_embedding = nn.Parameter(torch.randn(self.window_size ** 2, self.window_size ** 2))
+
+        if self.relative_pos_embedding:
+            self.relative_indices = get_relative_distances(window_size) + window_size - 1
+            self.pos_embedding = nn.Parameter(torch.randn(2 * window_size - 1, 2 * window_size - 1))
+        else:
+            self.pos_embedding = nn.Parameter(torch.randn(window_size ** 2, window_size ** 2))
+
         self.to_out = nn.Linear(inner_dim, dim)
 
     def forward(self, x):
@@ -98,7 +112,11 @@ class WindowAttention(nn.Module):
                                 h=h, w_h=self.window_size, w_w=self.window_size), qkv)
 
         dots = einsum('b h w i d, b h w j d -> b h w i j', q, k) * self.scale
-        dots += self.pos_embedding
+
+        if self.relative_pos_embedding:
+            dots += self.pos_embedding[self.relative_indices[:, :, 0], self.relative_indices[:, :, 1]]
+        else:
+            dots += self.pos_embedding
 
         if self.shifted:
             dots[:, :, -nw_w:] += self.upper_lower_mask
@@ -117,13 +135,14 @@ class WindowAttention(nn.Module):
 
 
 class SwinBlock(nn.Module):
-    def __init__(self, dim, heads, head_dim, mlp_dim, shifted, window_size):
+    def __init__(self, dim, heads, head_dim, mlp_dim, shifted, window_size, relative_pos_embedding):
         super().__init__()
         self.attention_block = Residual(PreNorm(dim, WindowAttention(dim=dim,
                                                                      heads=heads,
                                                                      head_dim=head_dim,
                                                                      shifted=shifted,
-                                                                     window_size=window_size)))
+                                                                     window_size=window_size,
+                                                                     relative_pos_embedding=relative_pos_embedding)))
         self.mlp_block = Residual(PreNorm(dim, FeedForward(dim=dim, hidden_dim=mlp_dim)))
 
     def forward(self, x):
@@ -148,7 +167,8 @@ class PatchMerging(nn.Module):
 
 
 class StageModule(nn.Module):
-    def __init__(self, in_channels, hidden_dimension, layers, downscaling_factor, num_heads, head_dim, window_size):
+    def __init__(self, in_channels, hidden_dimension, layers, downscaling_factor, num_heads, head_dim, window_size,
+                 relative_pos_embedding):
         super().__init__()
         assert layers % 2 == 0, 'Stage layers need to be divisible by 2 for regular and shifted block.'
 
@@ -159,9 +179,9 @@ class StageModule(nn.Module):
         for _ in range(layers // 2):
             self.layers.append(nn.ModuleList([
                 SwinBlock(dim=hidden_dimension, heads=num_heads, head_dim=head_dim, mlp_dim=hidden_dimension * 4,
-                          shifted=False, window_size=window_size),
+                          shifted=False, window_size=window_size, relative_pos_embedding=relative_pos_embedding),
                 SwinBlock(dim=hidden_dimension, heads=num_heads, head_dim=head_dim, mlp_dim=hidden_dimension * 4,
-                          shifted=True, window_size=window_size),
+                          shifted=True, window_size=window_size, relative_pos_embedding=relative_pos_embedding),
             ]))
 
     def forward(self, x):
@@ -174,21 +194,21 @@ class StageModule(nn.Module):
 
 class SwinTransformer(nn.Module):
     def __init__(self, *, hidden_dim, layers, heads, channels=3, num_classes=1000, head_dim=32, window_size=7,
-                 downscaling_factors=(4, 2, 2, 2)):
+                 downscaling_factors=(4, 2, 2, 2), relative_pos_embedding=True):
         super().__init__()
 
         self.stage1 = StageModule(in_channels=channels, hidden_dimension=hidden_dim, layers=layers[0],
                                   downscaling_factor=downscaling_factors[0], num_heads=heads[0], head_dim=head_dim,
-                                  window_size=window_size)
+                                  window_size=window_size, relative_pos_embedding=relative_pos_embedding)
         self.stage2 = StageModule(in_channels=hidden_dim, hidden_dimension=hidden_dim * 2, layers=layers[1],
                                   downscaling_factor=downscaling_factors[1], num_heads=heads[1], head_dim=head_dim,
-                                  window_size=window_size)
+                                  window_size=window_size, relative_pos_embedding=relative_pos_embedding)
         self.stage3 = StageModule(in_channels=hidden_dim * 2, hidden_dimension=hidden_dim * 4, layers=layers[2],
                                   downscaling_factor=downscaling_factors[2], num_heads=heads[2], head_dim=head_dim,
-                                  window_size=window_size)
+                                  window_size=window_size, relative_pos_embedding=relative_pos_embedding)
         self.stage4 = StageModule(in_channels=hidden_dim * 4, hidden_dimension=hidden_dim * 8, layers=layers[3],
                                   downscaling_factor=downscaling_factors[3], num_heads=heads[3], head_dim=head_dim,
-                                  window_size=window_size)
+                                  window_size=window_size, relative_pos_embedding=relative_pos_embedding)
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(hidden_dim * 8),

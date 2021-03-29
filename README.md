@@ -33,7 +33,8 @@ net = SwinTransformer(
     num_classes=3,
     head_dim=32,
     window_size=7,
-    downscaling_factors=(4, 2, 2, 2)
+    downscaling_factors=(4, 2, 2, 2),
+    relative_pos_embedding=True
 )
 dummy_x = torch.randn(1, 3, 224, 224)
 logits = net(dummy_x)  # (1,3)
@@ -56,10 +57,10 @@ What dimension each head should have.
 - `window_size`: int.  
 What window size to use, make sure that after each downscaling the image dimensions are still divisible by the window size.    
 - `downscaling_factors`: 4-tuple of ints.  
-What downscaling factor to use in each stage. Make sure image dimension is large enough for downscaling factors.
-  
+What downscaling factor to use in each stage. Make sure image dimension is large enough for downscaling factors.    
+- `relative_position_embedding`: bool.  
+Whether to use learnable relative position embedding (2M-1)x(2M-1) or full positional embeddings (M²xM²).
 ### TODO
-- Replace learnable positional embedding bias by relative position bias.
 - Adjust code for and validate on ImageNet-1K and COCO 2017
 
 ### References
