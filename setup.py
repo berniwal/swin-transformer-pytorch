@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
     name='swin-transformer-pytorch',
     packages=find_packages(),
-    version='0.3',
+    version='0.4',
     license='MIT',
     description='Swin Transformer - Pytorch',
     long_description=long_description,
