@@ -58,7 +58,7 @@ What dimension each head should have.
 What window size to use, make sure that after each downscaling the image dimensions are still divisible by the window size.    
 - `downscaling_factors`: 4-tuple of ints.  
 What downscaling factor to use in each stage. Make sure image dimension is large enough for downscaling factors.    
-- `relative_position_embedding`: bool.  
+- `relative_pos_embedding`: bool.  
 Whether to use learnable relative position embedding (2M-1)x(2M-1) or full positional embeddings (M²xM²).
 ### TODO
 - Adjust code for and validate on ImageNet-1K and COCO 2017
